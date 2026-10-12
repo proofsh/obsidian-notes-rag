@@ -102,7 +102,10 @@ class Config:
     lmstudio_api_key: Optional[str] = None  # Bearer token for protected LM Studio instances
 
     # llama.cpp settings (llama-server, OpenAI-compatible /v1/embeddings)
-    llamacpp_url: str = "http://localhost:8080"
+    # Default port is 9931 since llama.cpp b11521 (was 8080).
+    # Supports both single-model mode and router mode (model-name routing
+    # with on-demand loading). See LlamaCppEmbedder in indexer.py.
+    llamacpp_url: str = "http://localhost:9931"
     llamacpp_model: str = "default"
     llamacpp_api_key: Optional[str] = None  # Bearer token when started with --api-key
 
@@ -278,7 +281,7 @@ def save_config(config: Config) -> Path:
     # llama.cpp settings
     if config.provider == "llamacpp":
         llamacpp_section: dict = {}
-        if config.llamacpp_url != "http://localhost:8080":
+        if config.llamacpp_url != "http://localhost:9931":
             llamacpp_section["url"] = config.llamacpp_url
         if config.llamacpp_model != "default":
             llamacpp_section["model"] = config.llamacpp_model

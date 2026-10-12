@@ -173,16 +173,80 @@ obsidian-rag --provider lmstudio index
 
 ## Using llama.cpp (local, no API key)
 
-Start `llama serve` with embedding support (`--embeddings` + `--pooling` are required), then:
+Start `llama serve` with embedding support (`--embedding` + `--pooling` are required), then:
 
 ```bash
-llama serve -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0 --embeddings --pooling mean --port 8080 -c 2048 -ub 2048
+llama serve -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0 --embedding --pooling mean --port 9931 -c 2048 -ub 2048
 obsidian-rag --provider llamacpp index
 ```
 
 The `-ub 2048` flag is important: since chunks can be up to 1,500 tokens long,
 the default physical batch size (512) would cause long chunks to be
 rejected with an `input is too large to process` error.
+
+> Default URL is `http://localhost:9931` (llama.cpp b11521+; older
+> servers defaulted to `8080`). Override with `--llamacpp-url` or
+> `OBSIDIAN_RAG_LLAMACPP_URL`.
+
+### Router mode (multiple models, on-demand loading)
+
+Launched **without** `-m`/`-hf`, `llama serve` becomes a router: each
+request's `model` field selects which model handles it, loading it
+automatically on first use.
+
+```bash
+# Router with embedding support (discovers the llama.cpp cache / --models-dir)
+llama serve --embedding --pooling mean --port 9931 -c 2048 -ub 2048
+
+# Route by model name — no per-model port needed.
+# The model loads on demand at first use (preloaded explicitly via
+# POST /models/load when possible; falls back to auto-load otherwise).
+obsidian-rag --provider llamacpp --model "nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0" index
+```
+
+List routable names with `curl http://localhost:9931/v1/models`.
+With `--no-models-autoload` the server requires an explicit
+`POST /models/load {"model": "<name>"}` — the embedder attempts this
+automatically before indexing/searching.
+
+### Router mode with `--models-preset` (per-model settings)
+
+Each `[section-name]` in the INI file becomes the model name used in
+API calls (`"model"` field). Example preset file (`models.ini`):
+
+```ini
+[nomic-embed-text-v2-moe]
+model = C:\ISO\models\nomic-ai--nomic-embed-text-v2-moe-GGUF\nomic-embed-text-v2-moe.Q4_K_M.gguf
+embedding = true
+pooling = mean
+ctx-size = 2048
+ubatch-size = 512
+```
+
+```bash
+llama serve --models-preset models.ini --port 9931
+
+# The section name is the model name — it loads on demand at first use.
+obsidian-rag --provider llamacpp --model "nomic-embed-text-v2-moe" index
+```
+
+Notes:
+- The preset key is `embedding` (boolean: `true`/`on`/`1`/`enabled`).
+  `embeddings` is accepted as an alias by the CLI, but `enable`
+  (without the trailing `d`) is not a recognized boolean — prefer `true`.
+- `ubatch-size` must cover your chunk size: with the default chunk size
+  (up to 1,500 tokens) use `-ub 2048` / `ubatch-size = 2048`, otherwise
+  long chunks are rejected with `input is too large to process`.
+  Conversely, with `ubatch-size = 512` every chunk must fit in 512 tokens,
+  so pair it with `chunk_size = 400` below.
+- `nomic-embed-text-v2-moe` combo (effective context 512): the model caps
+  slots at 512, so `ctx-size = 2048` reserves memory with no benefit —
+  `ctx-size = 512` is enough. Consistent setup:
+  `ctx-size = 512`, `ubatch-size = 512`, and `chunk_size = 400` in
+  `config.toml`, then `obsidian-rag index --clear`.
+- Tip: keep the section name containing the model family (e.g. `nomic`,
+  `qwen`) — task prefixes (`search_document: `, `Query: `) are derived
+  from the configured model name.
 
 > Note the model's context length: the training context for
 > `nomic-embed-text-v2-moe` is 512 tokens, so the server caps slots
@@ -202,7 +266,8 @@ rejected with an `input is too large to process` error.
 If the server was started with `--api-key`, pass it via `--llamacpp-api-key`
 or `OBSIDIAN_RAG_LLAMACPP_API_KEY`. When a single model is loaded,
 llama-server accepts any model name, so the default `default` works;
-otherwise set the model with `--model` or `OBSIDIAN_RAG_MODEL`.
+in router mode set the model with `--model` or `OBSIDIAN_RAG_MODEL`
+to the routable model name.
 
 ## Configuration
 
@@ -216,7 +281,7 @@ The setup wizard writes to `~/.config/obsidian-notes-rag/config.toml`. You can a
 | `OBSIDIAN_RAG_DATA` | Index storage path (default: platform-specific) |
 | `OBSIDIAN_RAG_OLLAMA_URL` | Ollama URL (default: `http://localhost:11434`) |
 | `OBSIDIAN_RAG_LMSTUDIO_URL` | LM Studio URL (default: `http://localhost:1234`) |
-| `OBSIDIAN_RAG_LLAMACPP_URL` | llama.cpp URL (default: `http://localhost:8080`) |
+| `OBSIDIAN_RAG_LLAMACPP_URL` | llama.cpp URL (default: `http://localhost:9931`) |
 | `OBSIDIAN_RAG_LLAMACPP_API_KEY` | llama.cpp API key (when started with `--api-key`) |
 | `OBSIDIAN_RAG_MODEL` | Override embedding model |
 

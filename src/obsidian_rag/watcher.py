@@ -63,7 +63,7 @@ def check_ollama_health(ollama_url: str = "http://localhost:11434") -> bool:
         return False
 
 
-def check_llamacpp_health(llamacpp_url: str = "http://localhost:8080") -> bool:
+def check_llamacpp_health(llamacpp_url: str = "http://localhost:9931") -> bool:
     """Check if llama.cpp llama-server is running and accessible."""
     try:
         base = llamacpp_url.rstrip("/")

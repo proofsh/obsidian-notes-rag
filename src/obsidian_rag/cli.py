@@ -232,7 +232,8 @@ def setup():
             config.lmstudio_model = click.prompt("Enter embedding model identifier")
     else:
         # llama.cpp setup - check connection after getting URL
-        default_llamacpp_url = "http://localhost:8080"
+        # (default port is 9931 since llama.cpp b11521; older servers used 8080)
+        default_llamacpp_url = "http://localhost:9931"
         llamacpp_url = click.prompt(
             "\nllama.cpp API URL",
             default=default_llamacpp_url
@@ -250,7 +251,8 @@ def setup():
         if server_running:
             click.echo(" ✓ connected")
 
-            # Fetch available models (usually a single loaded model)
+            # Fetch available models (single-model mode: 1 entry;
+            # router mode: every routable model name)
             click.echo("Fetching available models...", nl=False)
             available_models = get_llamacpp_models(llamacpp_url, api_key=config.llamacpp_api_key)
 
@@ -271,15 +273,23 @@ def setup():
                     config.llamacpp_model = click.prompt("Enter embedding model identifier")
             else:
                 click.echo(" none found")
-                click.echo("\nCould not list models. If a single model is loaded,")
-                click.echo("you can keep 'default' — llama-server accepts any model name.")
+                click.echo("\nCould not list models.")
+                click.echo("Single-model mode: keep 'default' — llama-server accepts any model name.")
+                click.echo("Router mode (`llama serve` without -m/-hf): enter a routable model")
+                click.echo("name — a Hugging Face ID (e.g.")
+                click.echo("`nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0`), a cached GGUF name,")
+                click.echo("or a `--models-preset` [section-name] —")
+                click.echo("it will be loaded on demand at first use.")
                 click.echo("Start the server with embedding support, e.g.:")
-                click.echo("  llama serve -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0 --embeddings --pooling mean -c 2048 -ub 2048")
+                click.echo("  llama serve -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0 --embedding --pooling mean -c 2048 -ub 2048")
+                click.echo("  llama serve --embedding --pooling mean -c 2048 -ub 2048  # router mode")
                 config.llamacpp_model = click.prompt("\nEnter embedding model identifier", default="default")
         else:
             click.echo(" not detected (server may still work)")
             click.echo("Start the server with embedding support, e.g.:")
-            click.echo("  llama serve -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0 --embeddings --pooling mean")
+            click.echo("  llama serve -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0 --embedding --pooling mean")
+            click.echo("Or router mode (models load on demand by name):")
+            click.echo("  llama serve --embedding --pooling mean")
             config.llamacpp_model = click.prompt("\nEnter embedding model identifier", default="default")
 
     # 3. Vault path

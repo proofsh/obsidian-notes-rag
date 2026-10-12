@@ -470,22 +470,37 @@ class LMStudioEmbedder:
 class LlamaCppEmbedder:
     """Generate embeddings using llama.cpp llama-server (local, OpenAI-compatible API).
 
-    Expects the server to be started with embedding support, e.g.::
+    Supports both single-model mode and router mode::
 
-        llama serve -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0 --embeddings --pooling mean --port 8080 -c 2048 -ub 2048
+        # Single-model mode (one model fixed at startup)
+        llama serve -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0 --embeddings --pooling mean --port 9931 -c 2048 -ub 2048
+
+        # Router mode (no -m/-hf: models route by name, loaded on demand)
+        llama serve --port 9931 --embedding --pooling mean -c 2048 -ub 2048
+        # then set model to e.g. "nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0"
+        # — the first /v1/embeddings request auto-loads it (or call
+        # ensure_model_loaded() to preload explicitly).
 
     NOTE: ``-ub 2048`` matters — chunks can be up to 1500 tokens while the
     server default physical batch size is 512, so longer chunks would be
     rejected with "input is too large to process".
 
     Uses the OpenAI-compatible ``POST /v1/embeddings`` endpoint.
-    The ``model`` value is passed through as-is; llama-server typically
-    accepts any value (or the ``--alias``) when a single model is loaded.
+    In single-model mode llama-server typically accepts any value (or the
+    ``--alias``); in router mode the ``model`` value routes to a specific
+    model and triggers on-demand loading.
     """
+
+    #: Default URL (llama.cpp b11521+ listens on 9931; was 8080).
+    DEFAULT_URL = "http://localhost:9931"
+
+    #: Timeout for embedding requests. Generous because the first request
+    #: in router mode may block while the server downloads/loads the model.
+    EMBED_TIMEOUT = 300.0
 
     def __init__(
         self,
-        base_url: str = "http://localhost:8080",
+        base_url: str = "http://localhost:9931",
         model: str = "default",
         api_key: Optional[str] = None,
     ):
@@ -494,7 +509,8 @@ class LlamaCppEmbedder:
         headers = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        self.client = httpx.Client(timeout=60.0, headers=headers)
+        self.client = httpx.Client(timeout=self.EMBED_TIMEOUT, headers=headers)
+        self._load_attempted: set[str] = set()
 
     def _get_prefix(self, task_type: str) -> str:
         model = self.model.lower()
@@ -508,7 +524,44 @@ class LlamaCppEmbedder:
                 return "Query: "
         return ""
 
+    def ensure_model_loaded(self, model: Optional[str] = None, timeout: float = 300.0) -> bool:
+        """Explicitly load a model on a router-mode server (``POST /models/load``).
+
+        In router mode (``llama serve`` started without ``-m``/``-hf``) each
+        ``/v1/embeddings`` request already auto-loads the ``model`` on first
+        use, unless the server was started with ``--no-models-autoload``.
+        Calling this first gives an earlier, clearer error and lets callers
+        warm the model before a long indexing run.
+
+        Returns True if the model is (now) available, False if the server
+        does not expose the router management API (e.g. single-model mode —
+        nothing to do) or the load request failed. Never raises: embedding
+        calls will surface the real error.
+        """
+        target = model or self.model
+        if not target or target == "default":
+            return False
+        if target in self._load_attempted:
+            return True
+        self._load_attempted.add(target)
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                headers = dict(self.client.headers)
+                resp = client.post(
+                    f"{self.base_url}/models/load",
+                    json={"model": target},
+                    headers=headers,
+                )
+                if resp.status_code == 404:
+                    # No router management API -> single-model mode.
+                    return False
+                resp.raise_for_status()
+                return True
+        except (httpx.RequestError, httpx.TimeoutException, ValueError):
+            return False
+
     def embed(self, text: str, task_type: str = "search_document") -> List[float]:
+        self.ensure_model_loaded()
         prefix = self._get_prefix(task_type)
         response = self.client.post(
             f"{self.base_url}/v1/embeddings",
@@ -518,6 +571,7 @@ class LlamaCppEmbedder:
         return response.json()["data"][0]["embedding"]
 
     def embed_batch(self, texts: List[str], task_type: str = "search_document") -> List[List[float]]:
+        self.ensure_model_loaded()
         prefix = self._get_prefix(task_type)
         prefixed_texts = [f"{prefix}{t}" for t in texts]
         response = self.client.post(
@@ -594,7 +648,7 @@ def get_ollama_models(base_url: str = "http://localhost:11434", api_key: Optiona
         return []
 
 
-def is_llamacpp_running(base_url: str = "http://localhost:8080", api_key: Optional[str] = None) -> bool:
+def is_llamacpp_running(base_url: str = "http://localhost:9931", api_key: Optional[str] = None) -> bool:
     """Check if llama.cpp llama-server is running."""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
@@ -611,24 +665,47 @@ def is_llamacpp_running(base_url: str = "http://localhost:8080", api_key: Option
         return False
 
 
-def get_llamacpp_models(base_url: str = "http://localhost:8080", api_key: Optional[str] = None) -> List[str]:
+def get_llamacpp_models(base_url: str = "http://localhost:9931", api_key: Optional[str] = None) -> List[str]:
     """Get list of available models from llama.cpp llama-server.
 
-    llama-server usually serves a single loaded model, so every id
-    reported by ``/v1/models`` is returned as-is (no embedding keyword
-    filtering).
+    Works in both modes:
+
+    - Single-model mode: every id reported by ``/v1/models`` is returned
+      as-is (no embedding keyword filtering).
+    - Router mode (``llama serve`` without ``-m``/``-hf``): ``/v1/models``
+      lists routable model names (e.g. ``"ggml-org/...:Q8_0"``), and the
+      router-native ``/models`` endpoint lists discovered models with
+      load status. Both are tried; results are merged.
     """
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    found: set[str] = set()
     try:
         with httpx.Client(timeout=5.0, headers=headers) as client:
-            response = client.get(f"{base_url.rstrip('/')}/v1/models")
-            if response.status_code != 200:
-                return []
-            data = response.json()
-            models = [m.get("id", "") for m in data.get("data", [])]
-            return sorted(m for m in models if m)
-    except (httpx.RequestError, httpx.TimeoutException, ValueError):
-        return []
+            base = base_url.rstrip("/")
+            response = client.get(f"{base}/v1/models")
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    for m in data.get("data", []):
+                        model_id = m.get("id", "")
+                        if model_id:
+                            found.add(model_id)
+                except ValueError:
+                    pass
+            # Router-native endpoint: {"data": [{"id": ..., "status": {...}}, ...]}
+            try:
+                response = client.get(f"{base}/models")
+                if response.status_code == 200:
+                    data = response.json()
+                    entries = data.get("data", []) if isinstance(data, dict) else []
+                    for m in entries:
+                        if isinstance(m, dict) and m.get("id"):
+                            found.add(m["id"])
+            except (httpx.RequestError, httpx.TimeoutException, ValueError):
+                pass
+    except (httpx.RequestError, httpx.TimeoutException):
+        return sorted(found)
+    return sorted(found)
 
 
 Embedder = OpenAIEmbedder | OllamaEmbedder | LMStudioEmbedder | LlamaCppEmbedder
