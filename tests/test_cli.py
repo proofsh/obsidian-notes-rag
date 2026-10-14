@@ -7,7 +7,7 @@ from obsidian_rag.cli import main
 
 
 class TestIndexCommand:
-    def test_index_with_path_filter(self):
+    def test_index_with_path_filter(self, tmp_path):
         """Verify --path-filter option is accepted and passed through."""
         runner = CliRunner()
         with patch("obsidian_rag.cli.create_embedder") as mock_embedder, \
@@ -19,7 +19,9 @@ class TestIndexCommand:
             mock_store.return_value.get_stats.return_value = {"count": 0}
             mock_indexer.return_value.iter_markdown_files.return_value = []
 
-            result = runner.invoke(main, ["index", "--path-filter", "Daily Notes/"])
+            result = runner.invoke(
+                main, ["--vault", str(tmp_path), "index", "--path-filter", "Daily Notes/"]
+            )
             assert result.exit_code == 0
 
 
