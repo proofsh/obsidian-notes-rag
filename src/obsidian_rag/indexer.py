@@ -8,12 +8,15 @@ import uuid
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterator, Optional, List, Dict, Tuple
+from typing import TYPE_CHECKING, Iterator, Optional, List, Dict, Tuple
 
 import httpx
 import yaml
 from chonkie import RecursiveChunker
 from chonkie.types.recursive import RecursiveLevel, RecursiveRules
+
+if TYPE_CHECKING:
+    from .links import LinkResolver
 
 
 @dataclass
