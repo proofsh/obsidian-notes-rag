@@ -239,6 +239,10 @@ def _build_rules(cfg: IndexerConfig) -> RecursiveRules:
         RecursiveLevel(delimiters="\n"),
         RecursiveLevel(delimiters=[". ", "! ", "? "]),
         RecursiveLevel(whitespace=True),
+        # Last resort: split by token count. Without this, text that the
+        # levels above cannot break (long runs of short words under chonkie
+        # >= 1.7, or space-free content) can exceed chunk_size.
+        RecursiveLevel(),
     ])
 
     return RecursiveRules(levels=levels)
