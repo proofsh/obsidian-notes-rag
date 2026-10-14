@@ -185,6 +185,24 @@ _FENCED_CODE_RE = re.compile(
     re.DOTALL,
 )
 
+# Excalidraw notes embed the drawing as an encoded data block. It has no
+# meaning as text, so it is removed before chunking. The "## Text Elements"
+# section holds the drawing's real text and is kept.
+_COMPRESSED_JSON_RE = re.compile(r"^```compressed-json[ \t]*\n.*?^```[ \t]*$\n?", re.DOTALL | re.MULTILINE)
+_EXCALIDRAW_JSON_RE = re.compile(r"^```json[ \t]*\n.*?^```[ \t]*$\n?", re.DOTALL | re.MULTILINE)
+_EXCALIDRAW_BANNER_RE = re.compile(r"^==⚠.*EXCALIDRAW VIEW.*⚠==[ \t]*$\n?", re.MULTILINE)
+_BLOCK_ID_RE = re.compile(r"[ \t]+\^[A-Za-z0-9_-]+[ \t]*$", re.MULTILINE)
+
+
+def _strip_drawing_data(body: str, frontmatter: Dict) -> str:
+    """Remove encoded drawing data that would become meaningless chunks."""
+    body = _COMPRESSED_JSON_RE.sub("", body)
+    if "excalidraw-plugin" in frontmatter:
+        body = _EXCALIDRAW_JSON_RE.sub("", body)
+        body = _EXCALIDRAW_BANNER_RE.sub("", body)
+        body = _BLOCK_ID_RE.sub("", body)
+    return body
+
 # U+2028 LINE SEPARATOR — not used in markdown, invisible to the chunker's
 # delimiter rules, but preserves the character count so token budgets stay
 # accurate.  Restored to \n after chunking.
@@ -279,6 +297,7 @@ def chunk_markdown(
     """
     cfg = config or _default_config
     frontmatter, body = parse_frontmatter(content)
+    body = _strip_drawing_data(body, frontmatter)
 
     if not body.strip():
         return []

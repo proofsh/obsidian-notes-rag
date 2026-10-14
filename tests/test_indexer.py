@@ -91,3 +91,46 @@ Actual content here."""
         """Empty or whitespace-only content returns no chunks."""
         assert chunk_markdown("", "test.md") == []
         assert chunk_markdown("   \n\n  ", "test.md") == []
+
+
+class TestExcalidrawDrawingData:
+    BLOB = "N4KAkARALgngDgUwgLgAQQQDwMYEMA2AlgCYBOuA7hADTgQBuCpAzoQPYB" * 40
+
+    def _note(self, fence: str = "compressed-json") -> str:
+        return (
+            "---\nexcalidraw-plugin: parsed\ntags: [excalidraw]\n---\n"
+            "==⚠  Switch to EXCALIDRAW VIEW in the MORE OPTIONS menu of this document. ⚠==\n\n"
+            "# Excalidraw Data\n\n## Text Elements\n"
+            "Persona ^4w3FVofx\n\nPivot Framework ^4wPlPKKv\n\n"
+            f"%%\n## Drawing\n```{fence}\n{self.BLOB}\n\n{self.BLOB}\n```\n%%\n"
+        )
+
+    def test_compressed_drawing_removed_text_kept(self):
+        chunks = chunk_markdown(self._note(), "Excalidraw/d.excalidraw.md")
+        text = "\n".join(c.content for c in chunks)
+        assert self.BLOB[:40] not in text
+        assert "Persona" in text and "Pivot Framework" in text
+
+    def test_uncompressed_json_drawing_removed(self):
+        chunks = chunk_markdown(self._note("json"), "Excalidraw/d.excalidraw.md")
+        assert self.BLOB[:40] not in "\n".join(c.content for c in chunks)
+
+    def test_banner_and_block_ids_removed(self):
+        text = "\n".join(c.content for c in chunk_markdown(self._note(), "d.md"))
+        assert "EXCALIDRAW VIEW" not in text
+        assert "^4w3FVofx" not in text
+
+    def test_regular_note_json_and_block_ids_untouched(self):
+        content = (
+            "# Config\n\nSee this paragraph for the setup details. ^setup1\n\n"
+            '```json\n{"key": "value", "enabled": true, "retries": 3}\n```\n'
+        )
+        text = "\n".join(c.content for c in chunk_markdown(content, "Notes/config.md"))
+        assert '"key": "value"' in text
+        assert "^setup1" in text
+
+    def test_compressed_json_removed_even_without_excalidraw_frontmatter(self):
+        content = f"# Embedded\n\nA sketch of the triage flow.\n\n```compressed-json\n{self.BLOB}\n```\n"
+        text = "\n".join(c.content for c in chunk_markdown(content, "Notes/n.md"))
+        assert self.BLOB[:40] not in text
+        assert "triage flow" in text
