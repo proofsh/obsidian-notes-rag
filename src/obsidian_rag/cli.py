@@ -903,7 +903,13 @@ def _get_plist_content(vault_path: str, data_path: str, provider: str, ollama_ur
 @main.command("install-service")
 @click.pass_context
 def install_service(ctx):
-    """Install launchd service for auto-start on macOS."""
+    """Install launchd service for auto-start"""    
+    if sys.platform.startswith("linux"):
+        from obsidian_rag import service_linux
+        # Pass whatever your CLI stores the global --vault/--data options in:
+        sys.exit(service_linux.install_service(vault=ctx.obj.get("vault"),
+                                               data=ctx.obj.get("data")))
+    
     if sys.platform != "darwin":
         # TODO: Implement Linux systemd and Windows Task Scheduler support
         click.echo("Error: This command currently only supports macOS. Linux/Windows support planned.", err=True)
@@ -950,7 +956,14 @@ def install_service(ctx):
 
 @main.command("uninstall-service")
 def uninstall_service():
-    """Uninstall launchd service on macOS."""
+    """Uninstall launchd service."""
+    if sys.platform.startswith("linux"):
+        from obsidian_rag import service_linux
+        # Pass whatever your CLI stores the global --vault/--data options in:
+        sys.exit(service_linux.uninstall_service(vault=ctx.obj.get("vault"),
+                                               data=ctx.obj.get("data")))
+
+    
     if sys.platform != "darwin":
         # TODO: Implement Linux systemd and Windows Task Scheduler support
         click.echo("Error: This command currently only supports macOS. Linux/Windows support planned.", err=True)
@@ -979,6 +992,12 @@ def uninstall_service():
 @main.command("service-status")
 def service_status():
     """Check launchd service status on macOS."""
+    if sys.platform.startswith("linux"):
+        from obsidian_rag import service_linux
+        # Pass whatever your CLI stores the global --vault/--data options in:
+        sys.exit(service_linux.service_status(vault=ctx.obj.get("vault"),
+                                               data=ctx.obj.get("data")))
+    
     if sys.platform != "darwin":
         # TODO: Implement Linux systemd and Windows Task Scheduler support
         click.echo("Error: This command currently only supports macOS. Linux/Windows support planned.", err=True)

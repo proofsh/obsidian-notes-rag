@@ -46,16 +46,20 @@ DEFAULT_OLLAMA_URL = _config.ollama_url
 DEFAULT_LMSTUDIO_URL = _config.lmstudio_url
 DEFAULT_OLLAMA_API_KEY: Optional[str] = _config.get_ollama_api_key()
 DEFAULT_LMSTUDIO_API_KEY: Optional[str] = _config.get_lmstudio_api_key()
-DEFAULT_MODEL: Optional[str] = None  # Use provider default
+DEFAULT_MODEL: Optional[str] = getattr(_config, f"{_config.provider}_model", None)
 DEFAULT_DEBOUNCE = float(os.environ.get("OBSIDIAN_RAG_DEBOUNCE", "2.0"))
 
 logger = logging.getLogger(__name__)
 
 
-def check_ollama_health(ollama_url: str = "http://localhost:11434") -> bool:
+def check_ollama_health(
+    ollama_url: str = "http://localhost:11434",
+    api_key: Optional[str] = None,
+) -> bool:
     """Check if Ollama is running and accessible."""
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
-        response = httpx.get(f"{ollama_url}/api/tags", timeout=5.0)
+        response = httpx.get(f"{ollama_url}/api/tags", timeout=5.0, headers=headers)
         return response.status_code == 200
     except Exception:
         return False
@@ -339,6 +343,7 @@ class VaultWatcher:
         self.vault_path = Path(vault_path)
         self.provider = provider
         self.ollama_url = ollama_url
+        self.ollama_api_key = ollama_api_key
 
         # Set OpenAI API key from config if needed
         if provider == "openai" and _config.openai_api_key:
@@ -349,10 +354,10 @@ class VaultWatcher:
             base_url = ollama_url
             api_key = ollama_api_key
             # Health check for Ollama before starting
-            if not check_ollama_health(ollama_url):
+            if not check_ollama_health(ollama_url, api_key):
                 logger.warning("Ollama is not running! Waiting for it to start...")
                 send_notification("Obsidian RAG", "Waiting for Ollama to start...")
-                self._wait_for_ollama(ollama_url)
+                self._wait_for_ollama(ollama_url, api_key=api_key)
         elif provider == "lmstudio":
             base_url = lmstudio_url
             api_key = lmstudio_api_key
@@ -370,11 +375,11 @@ class VaultWatcher:
         self._running = False
         self._health_thread: Optional[threading.Thread] = None
 
-    def _wait_for_ollama(self, ollama_url: str, timeout: int = 300):
+    def _wait_for_ollama(self, ollama_url: str, timeout: int = 300, api_key: Optional[str] = None):
         """Wait for Ollama to become available."""
         start = time.time()
         while time.time() - start < timeout:
-            if check_ollama_health(ollama_url):
+            if check_ollama_health(ollama_url, api_key):
                 logger.info("Ollama is now available!")
                 return
             time.sleep(5)
@@ -389,7 +394,7 @@ class VaultWatcher:
                 break
 
             # Check health
-            if self.provider == "ollama" and not check_ollama_health(self.ollama_url):
+            if self.provider == "ollama" and not check_ollama_health(self.ollama_url, self.ollama_api_key):
                 logger.warning("Ollama health check failed!")
                 send_notification("Obsidian RAG", "Ollama is not responding")
                 continue
