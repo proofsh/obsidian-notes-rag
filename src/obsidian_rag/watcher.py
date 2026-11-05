@@ -222,7 +222,7 @@ class NoteEventHandler(FileSystemEventHandler):
         """Get the path relative to the vault root."""
         return str(path.relative_to(self.vault_path))
 
-    def _index_file(self, path: Path):
+    def _index_file(self, path: Path, raise_on_error: bool = False):
         """Index or re-index a single file."""
         if self._should_ignore(path):
             return
@@ -249,6 +249,10 @@ class NoteEventHandler(FileSystemEventHandler):
             self.store.replace_links(rel_path, sorted(self.indexer.file_links(path)))
         except Exception as e:
             logger.error(f"Error indexing {rel_path}: {e}")
+            # During a retry, let the caller requeue with an incremented attempt
+            # count instead of re-adding at attempt 0 (which looped forever)
+            if raise_on_error:
+                raise
             # Add to retry queue if available
             if self.retry_queue:
                 self.retry_queue.add(path)
@@ -399,8 +403,9 @@ class VaultWatcher:
                 send_notification("Obsidian RAG", "Ollama is not responding")
                 continue
 
-            # Process retry queue
-            while not self.retry_queue.is_empty():
+            # Process retry queue: one pass over the items queued right now, so
+            # requeued failures wait for the next health check
+            for _ in range(len(self.retry_queue._queue)):
                 item = self.retry_queue.get_next()
                 if item is None:
                     break
@@ -408,7 +413,8 @@ class VaultWatcher:
                 path, attempts = item
                 try:
                     if self._handler:
-                        self._handler._index_file(path)
+                        self._handler._index_file(path, raise_on_error=True)
+                    time.sleep(0.5)
                 except Exception as e:
                     logger.error(f"Retry failed for {path}: {e}")
                     self.retry_queue.requeue(path, attempts)
