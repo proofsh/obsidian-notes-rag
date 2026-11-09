@@ -1,5 +1,7 @@
 # CHANGELOG
 
+<!-- version list -->
+
 
 ## v1.4.3 (2026-10-14)
 
