@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -364,6 +365,41 @@ def _generate_chunk_id(
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
+FASTEMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+
+class FastEmbedEmbedder:
+    """Local CPU embeddings. Same model as the meeting search."""
+
+    def __init__(self, model: str = FASTEMBED_MODEL):
+        cache = os.environ.get("FASTEMBED_CACHE_PATH")
+        if not cache:
+            local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+            cache = str(Path(local) / "bnp-fa-transcripts" / "models")
+        Path(cache).mkdir(parents=True, exist_ok=True)
+        os.environ["FASTEMBED_CACHE_PATH"] = cache
+        os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+        from fastembed import TextEmbedding
+
+        self.model_name = model or FASTEMBED_MODEL
+        self._model = TextEmbedding(self.model_name, cache_dir=cache)
+
+    def embed(self, text: str, task_type: str = "search_document") -> List[float]:
+        return next(iter(self._model.embed([text[:12000]], batch_size=1))).tolist()
+
+    def embed_batch(self, texts: List[str], task_type: str = "search_document") -> List[List[float]]:
+        vectors: List[List[float]] = []
+        step = 16
+        for start in range(0, len(texts), step):
+            batch = [text[:12000] for text in texts[start : start + step]]
+            vectors.extend(item.tolist() for item in self._model.embed(batch, batch_size=step))
+        return vectors
+
+    def close(self):
+        pass
+
+
 class OpenAIEmbedder:
     """Generate embeddings using OpenAI API."""
 
@@ -543,7 +579,7 @@ def get_ollama_models(base_url: str = "http://localhost:11434", api_key: Optiona
         return []
 
 
-Embedder = OpenAIEmbedder | OllamaEmbedder | LMStudioEmbedder
+Embedder = OpenAIEmbedder | OllamaEmbedder | LMStudioEmbedder | FastEmbedEmbedder
 
 
 def create_embedder(
@@ -576,8 +612,13 @@ def create_embedder(
         if api_key:
             kwargs["api_key"] = api_key
         return LMStudioEmbedder(**kwargs)
+    elif provider == "fastembed":
+        kwargs = {}
+        if model:
+            kwargs["model"] = model
+        return FastEmbedEmbedder(**kwargs)
     else:
-        raise ValueError(f"Unknown provider: {provider}. Use 'openai', 'ollama', or 'lmstudio'.")
+        raise ValueError(f"Unknown provider: {provider}. Use 'openai', 'ollama', 'lmstudio', or 'fastembed'.")
 
 
 class VaultIndexer:

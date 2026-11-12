@@ -89,6 +89,9 @@ class Config:
 
     # OpenAI model (optional override)
     openai_model: str = "text-embedding-3-small"
+
+    # Local FastEmbed model (same as the meeting search)
+    fastembed_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     indexer: IndexerConfig = field(default_factory=IndexerConfig)
 
     def get_data_path(self) -> str:
@@ -176,6 +179,8 @@ def load_config() -> Config:
             config.ollama_model = os.environ["OBSIDIAN_RAG_MODEL"]
         elif config.provider == "lmstudio":
             config.lmstudio_model = os.environ["OBSIDIAN_RAG_MODEL"]
+        elif config.provider == "fastembed":
+            config.fastembed_model = os.environ["OBSIDIAN_RAG_MODEL"]
         else:
             config.openai_model = os.environ["OBSIDIAN_RAG_MODEL"]
 

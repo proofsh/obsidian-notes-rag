@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from functools import partial
 from typing import Optional
 
+import anyio
 from mcp.server import MCPServer
 
 from .config import load_config, Config
@@ -47,6 +49,10 @@ def get_embedder() -> Embedder:
             model = config.ollama_model
             base_url = config.ollama_url
             api_key = config.get_ollama_api_key()
+        elif config.provider == "fastembed":
+            model = config.fastembed_model
+            base_url = None
+            api_key = None
         else:  # lmstudio
             model = config.lmstudio_model
             base_url = config.lmstudio_url
@@ -354,7 +360,27 @@ def reindex(clear: bool = False, path_filter: Optional[str] = None) -> dict:
 
 def run_server():
     """Run the MCP server."""
-    mcp.run(transport="stdio")
+    host = os.environ.get("OBSIDIAN_RAG_MCP_HOST", "127.0.0.1")
+    port = int(os.environ.get("OBSIDIAN_RAG_MCP_PORT", "8765"))
+    path = os.environ.get("OBSIDIAN_RAG_MCP_PATH", "/mcp")
+
+    async def run_stdio_and_stop_http(task_group: anyio.abc.TaskGroup) -> None:
+        await mcp.run_stdio_async()
+        task_group.cancel_scope.cancel()
+
+    async def run_transports() -> None:
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(
+                partial(
+                    mcp.run_streamable_http_async,
+                    host=host,
+                    port=port,
+                    streamable_http_path=path,
+                )
+            )
+            task_group.start_soon(run_stdio_and_stop_http, task_group)
+
+    anyio.run(run_transports)
 
 
 if __name__ == "__main__":

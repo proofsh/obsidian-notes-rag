@@ -383,6 +383,8 @@ def index(ctx, clear, path_filter):
             model = config.ollama_model
         elif provider == "lmstudio":
             model = config.lmstudio_model
+        elif provider == "fastembed":
+            model = config.fastembed_model
 
     click.echo(f"Indexing vault: {vault_path}")
     click.echo(f"Data path: {data_path}")
@@ -480,6 +482,8 @@ def search(ctx, query, limit, note_type, expand, expand_limit):
             model = config.ollama_model
         elif provider == "lmstudio":
             model = config.lmstudio_model
+        elif provider == "fastembed":
+            model = config.fastembed_model
 
     # Determine the correct base_url and api_key based on provider
     if provider == "ollama":
@@ -572,6 +576,8 @@ def similar(ctx, note_path, limit):
             model = config.ollama_model
         elif provider == "lmstudio":
             model = config.lmstudio_model
+        elif provider == "fastembed":
+            model = config.fastembed_model
 
     if provider == "ollama":
         base_url = ollama_url
@@ -643,6 +649,8 @@ def context(ctx, note_path, limit):
             model = config.ollama_model
         elif provider == "lmstudio":
             model = config.lmstudio_model
+        elif provider == "fastembed":
+            model = config.fastembed_model
 
     if provider == "ollama":
         base_url = ollama_url
