@@ -269,13 +269,12 @@ class VectorStore:
             }
 
     def clear(self) -> None:
-        """Clear all data."""
+        """Clear all data, including the vector table so a new model can rebuild it."""
         with self._lock:
             self.db.execute("DELETE FROM chunks")
             self.db.execute("DELETE FROM links")
-            if self._dim is not None:
-                self.db.execute("DROP TABLE IF EXISTS chunks_vec")
-                self._dim = None
+            self.db.execute("DROP TABLE IF EXISTS chunks_vec")
+            self._dim = None
             self.db.commit()
 
     def _prepare_metadata(self, chunk: Chunk) -> Dict[str, Any]:
